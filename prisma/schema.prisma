@@ -1,0 +1,399 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// --------------------------------------------------------
+// ENUMS
+// --------------------------------------------------------
+
+enum UserRole {
+  OWNER
+  TENANT
+  ADMIN
+  STAFF
+}
+
+enum BedStatus {
+  VACANT
+  AVAILABLE
+  OCCUPIED
+  RESERVED
+  MAINTENANCE
+}
+
+enum RoomType {
+  SINGLE
+  DOUBLE
+  TRIPLE
+  FOUR_SHARING
+  DORMITORY
+}
+
+enum TenantStatus {
+  ACTIVE
+  NOTICE_PERIOD
+  CHECKED_OUT
+  BLACKLISTED
+}
+
+enum TenantApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum UserApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum OwnerInviteStatus {
+  LINK_CREATED
+  PENDING_APPROVAL
+  APPROVED
+  REVOKED
+}
+
+enum InvoiceStatus {
+  UNPAID
+  PENDING
+  PAID
+  PARTIALLY_PAID
+  OVERDUE
+  CANCELLED
+}
+
+enum PaymentMethod {
+  UPI
+  CASH
+  BANK_TRANSFER
+  CARD
+  ONLINE
+}
+
+enum ComplaintCategory {
+  PLUMBING
+  ELECTRICAL
+  WIFI
+  WIFI_INTERNET
+  CLEANING
+  CLEANING_HOUSEKEEPING
+  FURNITURE
+  FOOD
+  FOOD_MESS
+  SECURITY
+  NOISE
+  OTHER
+}
+
+enum ComplaintStatus {
+  OPEN
+  IN_PROGRESS
+  RESOLVED
+  REJECTED
+  CLOSED
+}
+
+enum ComplaintPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+// --------------------------------------------------------
+// CORE MODELS
+// --------------------------------------------------------
+
+/// Represents authenticated system users (Owners, Staff, and onboarded Tenants).
+model User {
+  id               String             @id @default(cuid())
+  email            String             @unique
+  passwordHash     String?
+  name             String
+  phone            String?            @unique
+  role             UserRole           @default(TENANT)
+  approvalStatus   UserApprovalStatus @default(APPROVED)
+  avatarUrl        String?
+  isActive         Boolean            @default(true)
+  emailVerified    DateTime?
+  sessionToken     String?            @unique
+  sessionExpiresAt DateTime?
+
+  // Relations
+  ownedProperties        Property[]        @relation("PropertyOwner")
+  sharedProperties       PropertyCoOwner[] @relation("PropertySharedCoOwners")
+  grantedCoOwnerships    PropertyCoOwner[] @relation("CoOwnerGrantedBy")
+  createdOwnerInvites    OwnerInvite[]     @relation("OwnerInviteCreator")
+  ownerInviteApplication OwnerInvite?      @relation("OwnerInviteApplicant")
+  tenantProfile          Tenant?           @relation("TenantUserAccount")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([email])
+  @@index([role])
+}
+
+/// Represents a PG / Hostel building managed by an Owner.
+model Property {
+  id            String   @id @default(cuid())
+  name          String
+  slug          String?  @unique
+  address       String
+  city          String?
+  state         String?
+  postalCode    String?
+  contactNumber String?
+  email         String?
+  description   String?
+  rules         String?
+  amenities     String[] @default([])
+
+  // Ownership
+  ownerId String
+  owner   User   @relation("PropertyOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  // Relations
+  rooms        Room[]
+  tenants      Tenant[]
+  rentInvoices RentInvoice[]
+  complaints   Complaint[]
+  coOwners     PropertyCoOwner[]
+  ownerInvites OwnerInvite[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerId])
+  @@index([city])
+}
+
+model PropertyCoOwner {
+  id            String @id @default(cuid())
+  propertyId    String
+  userId        String
+  grantedById   String
+  ownerInviteId String @unique
+
+  property    Property    @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  user        User        @relation("PropertySharedCoOwners", fields: [userId], references: [id], onDelete: Cascade)
+  grantedBy   User        @relation("CoOwnerGrantedBy", fields: [grantedById], references: [id], onDelete: Cascade)
+  ownerInvite OwnerInvite @relation(fields: [ownerInviteId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+
+  @@unique([propertyId, userId])
+  @@index([userId])
+}
+
+model OwnerInvite {
+  id                    String            @id @default(cuid())
+  token                 String            @unique
+  invitedEmail          String?
+  note                  String?
+  status                OwnerInviteStatus @default(LINK_CREATED)
+  applicantName         String?
+  applicantEmail        String?
+  applicantPhone        String?
+  applicantPasswordHash String?
+  applicantUserId       String?           @unique
+  expiresAt             DateTime
+  createdAt             DateTime          @default(now())
+  updatedAt             DateTime          @updatedAt
+  propertyId            String
+  createdById           String
+
+  property      Property         @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  createdBy     User             @relation("OwnerInviteCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  applicantUser User?            @relation("OwnerInviteApplicant", fields: [applicantUserId], references: [id], onDelete: SetNull)
+  coOwner       PropertyCoOwner?
+
+  @@index([propertyId, status])
+  @@index([createdById])
+}
+
+/// Represents an individual room inside a Property.
+model Room {
+  id                  String   @id @default(cuid())
+  roomNumber          String // e.g., "101", "204-B"
+  floor               Int      @default(1)
+  roomType            RoomType @default(DOUBLE)
+  sharingType         Int      @default(2) // Number of beds/capacity in the room
+  hasAttachedBathroom Boolean  @default(true)
+  hasBalcony          Boolean  @default(false)
+  hasAC               Boolean  @default(false)
+  baseRent            Decimal  @db.Decimal(10, 2)
+
+  // Relations
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+  beds       Bed[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([propertyId, roomNumber])
+  @@index([propertyId])
+}
+
+/// Represents an individual bed slot within a shared Room.
+model Bed {
+  id         String    @id @default(cuid())
+  bedNumber  String // e.g. "101-A", "101-B"
+  status     BedStatus @default(VACANT)
+  rentAmount Decimal   @default(0.00) @db.Decimal(10, 2)
+
+  // Relations
+  roomId String
+  room   Room    @relation(fields: [roomId], references: [id], onDelete: Cascade)
+  tenant Tenant? @relation("TenantAllocatedBed")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([roomId, bedNumber])
+  @@index([roomId])
+  @@index([status])
+}
+
+/// Represents a resident tenant stay record and KYC profile.
+model Tenant {
+  id             String               @id @default(cuid())
+  name           String
+  fullName       String?
+  email          String
+  phone          String
+  status         TenantStatus         @default(ACTIVE)
+  approvalStatus TenantApprovalStatus @default(APPROVED)
+
+  // KYC & Emergency Contacts
+  dateOfBirth           DateTime?
+  permanentHomeAddress  String?
+  emergencyContactName  String?
+  emergencyContactPhone String?
+  occupationOrCollege   String?
+  idReferenceNumber     String?
+  idDocumentUrl         String?
+  profilePhotoUrl       String?
+  idProofType           String? // e.g., "AADHAAR", "PAN", "PASSPORT"
+  idProofNumber         String?
+  aadhaarNumber         String?
+  idProofDocumentUrl    String?
+  preferredRoomType     RoomType?
+  preferredSharing      Int?
+
+  // Stay Lifecycle
+  checkInDate     DateTime  @default(now())
+  checkOutDate    DateTime?
+  securityDeposit Decimal   @default(0.00) @db.Decimal(10, 2)
+  depositAmount   Decimal   @default(0.00) @db.Decimal(10, 2)
+  depositPaid     Boolean   @default(false)
+
+  // System User linkage (optional, for tenant portal sign-in)
+  userId String? @unique
+  user   User?   @relation("TenantUserAccount", fields: [userId], references: [id], onDelete: SetNull)
+
+  // Location / Allocation
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Restrict)
+
+  bedId String? @unique
+  bed   Bed?    @relation("TenantAllocatedBed", fields: [bedId], references: [id], onDelete: SetNull)
+
+  // Financials & Support
+  rentInvoices RentInvoice[]
+  complaints   Complaint[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([propertyId])
+  @@index([status])
+  @@index([phone])
+}
+
+/// Represents periodic rent, utility, and maintenance billing for a Tenant.
+model RentInvoice {
+  id            String @id @default(cuid())
+  invoiceNumber String @unique // e.g., "INV-202611-0042"
+  billingMonth  Int // 1 to 12
+  billingYear   Int // e.g., 2026
+
+  // Charge Breakdown
+  rentAmount         Decimal  @default(0.00) @db.Decimal(10, 2)
+  baseRent           Decimal  @default(0.00) @db.Decimal(10, 2)
+  electricityAmount  Decimal? @default(0.00) @db.Decimal(10, 2)
+  electricityCharges Decimal  @default(0.00) @db.Decimal(10, 2)
+  waterCharges       Decimal  @default(0.00) @db.Decimal(10, 2)
+  maintenanceCharges Decimal  @default(0.00) @db.Decimal(10, 2)
+  otherCharges       Decimal  @default(0.00) @db.Decimal(10, 2)
+  discountAmount     Decimal  @default(0.00) @db.Decimal(10, 2)
+  totalAmount        Decimal  @db.Decimal(10, 2)
+  paidAmount         Decimal  @default(0.00) @db.Decimal(10, 2)
+
+  // Payment Tracking
+  status               InvoiceStatus  @default(UNPAID)
+  dueDate              DateTime
+  paidAt               DateTime?
+  paymentMethod        PaymentMethod?
+  paymentReceiptUrl    String?
+  transactionReference String? // UPI Ref, UTR, or bank receipt reference
+  notes                String?
+
+  // Relations
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, billingMonth, billingYear])
+  @@index([propertyId, billingYear, billingMonth])
+  @@index([status])
+  @@index([dueDate])
+}
+
+/// Represents a maintenance issue, repair request, or grievance raised by a Tenant.
+model Complaint {
+  id           String            @id @default(cuid())
+  ticketNumber String            @unique // e.g., "TCK-8921"
+  title        String
+  description  String
+  category     ComplaintCategory
+  priority     ComplaintPriority @default(MEDIUM)
+  status       ComplaintStatus   @default(OPEN)
+
+  // Attachments & Notes
+  photoUrl        String?
+  attachmentUrls  String[]  @default([])
+  assignedTo      String?
+  resolvedAt      DateTime?
+  resolutionNotes String?
+
+  // Relations
+  tenantId   String
+  tenant     Tenant   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  propertyId String
+  property   Property @relation(fields: [propertyId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([propertyId, status])
+  @@index([tenantId])
+  @@index([category])
+  @@index([priority])
+}

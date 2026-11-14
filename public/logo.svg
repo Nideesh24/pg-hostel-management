@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title id="title">OM Murugaa Mens Hostel</title>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f172a"/>
+      <stop offset="1" stop-color="#164e63"/>
+    </linearGradient>
+  </defs>
+  <rect x="4" y="4" width="120" height="120" rx="28" fill="url(#background)"/>
+  <path d="M64 16 104 31v31c0 25-16 41-40 51C40 103 24 87 24 62V31l40-15Z" fill="none" stroke="#bae6fd" stroke-width="4"/>
+  <path d="M42 70V48l22-13 22 13v22M50 70V53h28v17M58 70V59h12v11M35 81h58" fill="none" stroke="#fff" stroke-linecap="round" stroke-linejoin="round" stroke-width="4"/>
+  <text x="64" y="98" fill="#fff" font-family="Arial,sans-serif" font-size="16" font-weight="700" text-anchor="middle">OM</text>
+</svg>
