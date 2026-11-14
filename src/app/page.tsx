@@ -20,6 +20,7 @@ import { TenantOnboardModal } from './owner/components/TenantOnboardModal';
 import { OwnerRoomManagement } from './owner/components/OwnerRoomManagement';
 import { OwnerTenantManagement } from './owner/components/OwnerTenantManagement';
 import { InvoicesTable, InvoiceItem } from './owner/components/InvoicesTable';
+import { ComplaintsTable, OwnerComplaintItem } from './owner/components/ComplaintsTable';
 import { RefreshCw } from 'lucide-react';
 
 // ── Tenant Dashboard Imports ─────────────────────────────
@@ -707,6 +708,7 @@ function InlineOwnerDashboard({ user, onOwnerUpdated, isDark, toggleDark, onLogo
   const [selectedPropertyId, setSelectedPropertyId] = useState(properties[0]?.id || 'prop_1');
   const [rooms, setRooms] = useState<RoomData[]>([]);
   const [invoices, setInvoices] = useState<InvoiceItem[]>([]);
+  const [complaints, setComplaints] = useState<OwnerComplaintItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
@@ -731,6 +733,11 @@ function InlineOwnerDashboard({ user, onOwnerUpdated, isDark, toggleDark, onLogo
         throw new Error(invData.error || 'Unable to load rent invoices.');
       }
       setInvoices(invData.invoices);
+      const compRes = await fetch(`/api/owner/complaints?propertyId=${selectedPropertyId}`);
+      const compData = await compRes.json();
+      if (compRes.ok && compData.success && Array.isArray(compData.complaints)) {
+        setComplaints(compData.complaints);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unable to load owner dashboard data.';
       console.error('Owner dashboard data request failed:', error);
@@ -755,8 +762,9 @@ function InlineOwnerDashboard({ user, onOwnerUpdated, isDark, toggleDark, onLogo
   const pendingDues = invoices.filter((i) => i.status === 'UNPAID' || i.status === 'OVERDUE').reduce((a, i) => a + (i.totalAmount - (i.paidAmount || 0)), 0);
   const overdueCount = invoices.filter((i) => i.status === 'OVERDUE').length;
 
-  const metrics: KpiMetrics = { totalBeds, occupiedBeds, occupancyRate, totalMonthlyRevenue, collectedRevenue, pendingDues, overdueCount, openComplaints: 0, urgentComplaints: 0 };
-
+  const openComplaints = complaints.filter((c) => c.status === 'OPEN' || c.status === 'IN_PROGRESS').length;
+  const urgentComplaints = complaints.filter((c) => c.priority === 'URGENT' && c.status !== 'RESOLVED').length;
+  const metrics: KpiMetrics = { totalBeds, occupiedBeds, occupancyRate, totalMonthlyRevenue, collectedRevenue, pendingDues, overdueCount, openComplaints, urgentComplaints }; 
   return (
     <div className="min-h-screen bg-slate-50/60 dark:bg-slate-950">
       <UnifiedDashboardHeader
@@ -799,6 +807,7 @@ function InlineOwnerDashboard({ user, onOwnerUpdated, isDark, toggleDark, onLogo
         />
         <TenantDocumentsVault propertyId={selectedPropertyId} />
         <InvoicesTable invoices={invoices} isLoading={isLoading} propertyId={selectedPropertyId} onRefresh={fetchDashboardData} />
+        <ComplaintsTable complaints={complaints} isLoading={isLoading} onRefresh={fetchDashboardData} />
         <div className="mx-auto max-w-7xl px-4 pb-8 text-center text-xs text-slate-500 dark:text-slate-400 sm:px-6 lg:px-8">
           <a className="hover:underline" href={`tel:${CONTACT_PHONE}`}>{CONTACT_PHONE}</a>
           <span className="px-2">·</span>
