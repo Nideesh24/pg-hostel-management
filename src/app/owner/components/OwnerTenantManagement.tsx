@@ -20,6 +20,7 @@ interface SignupRequest {
 interface TenantSummary {
   id: string;
   name: string;
+  status: string;
   email: string;
   phone: string;
   bed: { bedNumber: string; room: { roomNumber: string } } | null;
@@ -51,6 +52,12 @@ export function OwnerTenantManagement({ propertyId, rooms, refreshKey, onRefresh
   const [details, setDetails] = useState<TenantDetails | null>(null);
   const [loadingDetails, setLoadingDetails] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [vacatingId, setVacatingId] = useState<string | null>(null);
+  const [vacateConfirmation, setVacateConfirmation] = useState<{
+    tenantId: string;
+    tenantName: string;
+    pendingDues: number | null;
+  } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const availableBeds = useMemo(
@@ -132,6 +139,42 @@ export function OwnerTenantManagement({ propertyId, rooms, refreshKey, onRefresh
     }
   };
 
+  const vacateTenant = async (tenantId: string, force = false) => {
+    setVacatingId(tenantId);
+    setError(null);
+    try {
+      const response = await fetch(`/api/owner/tenants/${encodeURIComponent(tenantId)}/vacate`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(force ? { force: true } : {}),
+      });
+      const data = await response.json();
+      if (data.requiresConfirmation) {
+        const tenant = tenants.find((record) => record.id === tenantId);
+        setVacateConfirmation({
+          tenantId,
+          tenantName: tenant?.name || 'this tenant',
+          pendingDues: Number(data.pendingDues),
+        });
+        return;
+      }
+      if (!response.ok || !data.success) throw new Error(data.error || 'Unable to vacate tenant.');
+
+      setVacateConfirmation(null);
+      await onRefresh();
+      await loadRecords();
+    } catch (vacateError) {
+      setError(vacateError instanceof Error ? vacateError.message : 'Unable to vacate tenant.');
+    } finally {
+      setVacatingId(null);
+    }
+  };
+
+  const confirmVacate = () => {
+    if (!vacateConfirmation) return;
+    void vacateTenant(vacateConfirmation.tenantId, vacateConfirmation.pendingDues !== null);
+  };
+
   return (
     <div className="space-y-6">
       {error && <div className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300"><AlertCircle className="h-4 w-4" />{error}</div>}
@@ -202,15 +245,34 @@ export function OwnerTenantManagement({ propertyId, rooms, refreshKey, onRefresh
           <p className="rounded-xl bg-slate-50 p-5 text-center text-sm text-slate-500 dark:bg-slate-800 dark:text-slate-400">No approved tenants yet.</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] text-left text-sm">
-              <thead className="text-xs uppercase text-slate-500 dark:text-slate-400"><tr><th className="pb-2">Tenant</th><th className="pb-2">Email / Phone</th><th className="pb-2">Room / Bed</th><th className="pb-2 text-right">KYC</th></tr></thead>
+            <table className="w-full min-w-[760px] text-left text-sm">
+              <thead className="text-xs uppercase text-slate-500 dark:text-slate-400"><tr><th className="pb-2">Tenant</th><th className="pb-2">Email / Phone</th><th className="pb-2">Room / Bed</th><th className="pb-2">Status</th><th className="pb-2 text-right">Actions</th></tr></thead>
               <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
                 {tenants.map((tenant) => (
                   <tr key={tenant.id}>
                     <td className="py-3 font-semibold text-slate-900 dark:text-white">{tenant.name}</td>
                     <td className="py-3 text-xs text-slate-600 dark:text-slate-300">{tenant.email}<br />{tenant.phone}</td>
                     <td className="py-3 text-xs text-slate-600 dark:text-slate-300">{tenant.bed ? `${tenant.bed.room.roomNumber} / ${tenant.bed.bedNumber}` : 'Not assigned'}</td>
-                    <td className="py-3 text-right"><button onClick={() => viewDetails(tenant.id)} className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"><Eye className="h-3.5 w-3.5" /> View</button></td>
+                    <td className="py-3 text-xs"><span className={`rounded-full px-2 py-1 font-semibold ${tenant.status === 'CHECKED_OUT' ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300' : tenant.status === 'NOTICE_PERIOD' ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-200' : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-200'}`}>{tenant.status.replace(/_/g, ' ')}</span></td>
+                    <td className="py-3 text-right">
+                      <div className="flex justify-end gap-2">
+                        <button onClick={() => viewDetails(tenant.id)} className="inline-flex min-h-[40px] items-center gap-1 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"><Eye className="h-3.5 w-3.5" /> View</button>
+                        {tenant.status !== 'CHECKED_OUT' && (
+                          <button
+                            type="button"
+                            disabled={vacatingId === tenant.id}
+                            onClick={() => {
+                              setError(null);
+                              setVacateConfirmation({ tenantId: tenant.id, tenantName: tenant.name, pendingDues: null });
+                            }}
+                            className="inline-flex min-h-[40px] items-center gap-1 rounded-lg border border-rose-200 px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 disabled:opacity-50 dark:border-rose-800 dark:text-rose-300 dark:hover:bg-rose-950/40"
+                          >
+                            {vacatingId === tenant.id && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+                            Vacate
+                          </button>
+                        )}
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -252,6 +314,45 @@ export function OwnerTenantManagement({ propertyId, rooms, refreshKey, onRefresh
               )}
             </div>
             <div className="mt-5 flex justify-end"><button onClick={() => setDetails(null)} className="inline-flex items-center gap-2 rounded-lg bg-slate-900 px-4 py-2 text-sm font-semibold text-white dark:bg-slate-100 dark:text-slate-900"><UserCheck className="h-4 w-4" /> Done</button></div>
+          </section>
+        </div>
+      )}
+      {vacateConfirmation && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-slate-950/60 p-4">
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="vacate-tenant-title"
+            className="w-[95vw] max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+          >
+            <h2 id="vacate-tenant-title" className="text-lg font-bold text-slate-900 dark:text-white">
+              {vacateConfirmation.pendingDues === null ? 'Confirm tenant checkout' : 'Unpaid rent warning'}
+            </h2>
+            <p className="mt-3 text-sm text-slate-600 dark:text-slate-300">
+              {vacateConfirmation.pendingDues === null
+                ? `Vacate ${vacateConfirmation.tenantName}? The assigned bed will become available.`
+                : `This tenant has ₹${vacateConfirmation.pendingDues.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} in pending rent. Vacate anyway?`}
+            </p>
+            {error && <p role="alert" className="mt-3 rounded-lg border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700 dark:border-rose-800 dark:bg-rose-950/40 dark:text-rose-300">{error}</p>}
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                disabled={vacatingId === vacateConfirmation.tenantId}
+                onClick={() => setVacateConfirmation(null)}
+                className="min-h-[44px] rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 disabled:opacity-50 dark:border-slate-700 dark:text-slate-200"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={vacatingId === vacateConfirmation.tenantId}
+                onClick={confirmVacate}
+                className="inline-flex min-h-[44px] items-center gap-2 rounded-lg bg-rose-700 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-800 disabled:opacity-50"
+              >
+                {vacatingId === vacateConfirmation.tenantId && <Loader2 className="h-4 w-4 animate-spin" />}
+                {vacateConfirmation.pendingDues === null ? 'Continue' : 'Vacate anyway'}
+              </button>
+            </div>
           </section>
         </div>
       )}

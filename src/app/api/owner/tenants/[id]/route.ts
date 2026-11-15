@@ -17,7 +17,7 @@ function isValidUpload(dataUrl: string, mimeTypes: string[]) {
 
 export async function GET(
   _request: Request,
-  context: { params: Promise<{ tenantId: string }> }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
     const user = await getAuthenticatedUser();
@@ -25,7 +25,7 @@ export async function GET(
       return NextResponse.json({ success: false, error: 'Owner sign-in is required.' }, { status: 403 });
     }
 
-    const { tenantId } = await context.params;
+    const { id: tenantId } = await context.params;
     const tenant = await prisma.tenant.findUnique({
       where: { id: tenantId },
       include: {
@@ -44,6 +44,7 @@ export async function GET(
         fullName: tenant.fullName,
         email: tenant.email,
         phone: tenant.phone,
+        status: tenant.status,
         dateOfBirth: tenant.dateOfBirth,
         permanentHomeAddress: tenant.permanentHomeAddress,
         emergencyContactName: tenant.emergencyContactName,
@@ -63,7 +64,7 @@ export async function GET(
 
 export async function PATCH(
   request: Request,
-  context: { params: Promise<{ tenantId: string }> }
+  context: { params: Promise<{ id: string }> }
 ) {
   try {
     const user = await getAuthenticatedUser();
@@ -71,7 +72,7 @@ export async function PATCH(
       return NextResponse.json({ success: false, error: 'Owner sign-in is required.' }, { status: 403 });
     }
 
-    const { tenantId } = await context.params;
+    const { id: tenantId } = await context.params;
     const tenant = await prisma.tenant.findUnique({
       where: { id: tenantId },
       select: { id: true, propertyId: true },
