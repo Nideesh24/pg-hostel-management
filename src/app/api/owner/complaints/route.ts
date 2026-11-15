@@ -27,7 +27,7 @@ export async function GET(request: NextRequest) {
             phone: true,
             bed: {
               select: {
-                bedLabel: true,
+                bedNumber: true,
                 room: { select: { roomNumber: true } },
               },
             },
